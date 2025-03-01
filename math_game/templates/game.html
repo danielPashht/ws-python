@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Math Quiz Game - Room {{ room_id }}</title>
+    <style>
+        .waiting { color: orange; }
+        .playing { color: green; }
+        .finished { color: blue; }
+        #question { font-size: 24px; font-weight: bold; }
+        #players { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Math Quiz Game</h1>
+    <p>Room ID: <strong>{{ room_id }}</strong> (Share this with your opponent)</p>
+
+    <div id="status" class="waiting">Waiting for players...</div>
+
+    <div id="game-container" style="display: none;">
+        <div id="question-container">
+            <p>Round: <span id="round">0</span>/<span id="total-rounds">10</span></p>
+            <div id="question"></div>
+            <input type="number" id="answer" placeholder="Your answer">
+            <button id="submit-answer">Submit</button>
+        </div>
+
+        <div id="players">
+            <h3>Players</h3>
+            <ul id="player-list"></ul>
+        </div>
+
+        <div id="result"></div>
+    </div>
+
+    <div id="game-over" style="display: none;">
+        <h2>Game Over!</h2>
+        <div id="winner"></div>
+        <div id="final-scores"></div>
+    </div>
+
+    <script>
+        const roomId = "{{ room_id }}";
+        const ws = new WebSocket(`ws://${window.location.host}/ws/${roomId}`);
+        let playerId = null;
+
+        ws.onopen = function() {
+            console.log("Connected to server");
+        };
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+
+            if (data.type === "room_update") {
+                updateRoomState(data);
+            }
+            else if (data.type === "question") {
+                showQuestion(data);
+            }
+            else if (data.type === "answer_result") {
+                showResult(data);
+            }
+            else if (data.type === "game_over") {
+                showGameOver(data);
+            }
+        };
+
+        document.getElementById("submit-answer").addEventListener("click", function() {
+            const answer = document.getElementById("answer").value;
+            ws.send(JSON.stringify({
+                type: "answer",
+                answer: answer
+            }));
+            document.getElementById("answer").value = "";
+        });
+
+        function updateRoomState(data) {
+            const statusElem = document.getElementById("status");
+            statusElem.textContent = getStatusText(data.state, data.connected);
+            statusElem.className = data.state;
+
+            // Update player list
+            const playerList = document.getElementById("player-list");
+            playerList.innerHTML = "";
+
+            data.players.forEach(player => {
+                const li = document.createElement("li");
+                li.textContent = `Player ${player.id.substr(0, 4)}: ${player.score} points`;
+                playerList.appendChild(li);
+
+                // Identify self
+                if (!playerId && data.players.length === 1) {
+                    playerId = player.id;
+                }
+            });
+
+            // Show game container if playing
+            if (data.state === "playing") {
+                document.getElementById("game-container").style.display = "block";
+            }
+        }
+
+        function getStatusText(state, connected) {
+            if (state === "waiting") {
+                return `Waiting for players... (${connected}/2)`;
+            } else if (state === "playing") {
+                return "Game in progress!";
+            } else {
+                return "Game finished";
+            }
+        }
+
+        function showQuestion(data) {
+            document.getElementById("round").textContent = data.round;
+            document.getElementById("total-rounds").textContent = data.total_rounds;
+            document.getElementById("question").textContent = data.question;
+            document.getElementById("result").textContent = "";
+            document.getElementById("answer").focus();
+        }
+
+        function showResult(data) {
+            const resultElem = document.getElementById("result");
+
+            if (data.correct) {
+                if (data.answered_by === playerId) {
+                    resultElem.textContent = "Correct! You got a point!";
+                } else {
+                    resultElem.textContent = "Your opponent answered correctly!";
+                }
+
+                // Update scores
+                const playerList = document.getElementById("player-list");
+                playerList.innerHTML = "";
+
+                data.score_update.forEach(player => {
+                    const li = document.createElement("li");
+                    li.textContent = `Player ${player.id.substr(0, 4)}: ${player.score} points`;
+                    playerList.appendChild(li);
+                });
+            } else {
+                resultElem.textContent = "Wrong answer, try again!";
+            }
+        }
+
+        function showGameOver(data) {
+            document.getElementById("game-container").style.display = "none";
+            document.getElementById("game-over").style.display = "block";
+
+            const winnerText = data.winner === playerId ?
+                "You won!" : "Your opponent won!";
+
+            document.getElementById("winner").textContent = winnerText;
+
+            const scoresElem = document.getElementById("final-scores");
+            scoresElem.innerHTML = "<h3>Final Scores</h3><ul>";
+
+            data.scores.forEach(player => {
+                const isYou = player.id === playerId;
+                scoresElem.innerHTML += `<li>${isYou ? "You" : "Opponent"}: ${player.score} points</li>`;
+            });
+
+            scoresElem.innerHTML += "</ul>";
+        }
+    </script>
+</body>
+</html>
